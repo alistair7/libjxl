@@ -120,18 +120,21 @@ struct DecompressArgs {
                            &allow_partial_files, &SetBooleanTrue, 1);
 
     if (jxl::extras::GetJPEGEncoder()) {
-      cmdline->AddOptionFlag(
-          'j', "pixels_to_jpeg",
-          "By default, if the input JXL is a recompressed JPEG file, "
-          "djxl reconstructs that JPEG file.\n"
-          "    This flag causes the decoder to instead decode to pixels and "
-          "encode a new (lossy) JPEG.",
-          &pixels_to_jpeg, &SetBooleanTrue, 1);
+      cmdline->AddOptionValue(
+          'j', "pixels_to_jpeg", "0|1",
+          "By default, if the input JXL is a recompressed JPEG file, and "
+          "JPEG output is requested,\n"
+          "    djxl reconstructs the original JPEG file. If this fails, the "
+          "decoder\n"
+          "    instead decodes to pixels and encodes a new (lossy) JPEG.\n"
+          "    This option either forces (1) or disables (0) decoding to "
+          "pixels.",
+          &pixels_to_jpeg, &ParseUint32, 1);
 
       opt_jpeg_quality_id = cmdline->AddOptionValue(
           'q', "jpeg_quality", "N",
           "Sets the JPEG output quality, default is 95. "
-          "Setting this option implies --pixels_to_jpeg.",
+          "Setting this option implies --pixels_to_jpeg=1.",
           &jpeg_quality, &ParseUnsigned, 1);
     }
 
@@ -249,7 +252,7 @@ struct DecompressArgs {
   std::string color_space;
   uint32_t downsampling = 0;
   bool allow_partial_files = false;
-  bool pixels_to_jpeg = false;
+  uint32_t pixels_to_jpeg = -1;
   size_t jpeg_quality = 95;
   bool use_sjpeg = false;
   bool render_spotcolors = true;
@@ -495,6 +498,18 @@ int main(int argc, const char* argv[]) {
        !cmdline.GetOption(args.opt_jpeg_quality_id)->matched())) {
     args.bits_per_sample = 0;
   }
+  if (args.pixels_to_jpeg == 0) {
+    if (codec != jxl::extras::Codec::kJPG) {
+      fprintf(stderr,
+              "--pixels_to_jpeg=0 is only valid when converting to JPEG.\n");
+      return EXIT_FAILURE;
+    }
+    if (cmdline.GetOption(args.opt_jpeg_quality_id)->matched()) {
+      fprintf(stderr,
+              "--jpeg_quality cannot be used with --pixels_to_jpeg=0.\n");
+      return EXIT_FAILURE;
+    }
+  }
 
   jpegxl::tools::SpeedStats stats;
   size_t num_worker_threads = JxlThreadParallelRunnerDefaultNumWorkerThreads();
@@ -509,7 +524,7 @@ int main(int argc, const char* argv[]) {
 
   bool decode_to_pixels = (codec != jxl::extras::Codec::kJPG);
   if (args.opt_jpeg_quality_id >= 0 &&
-      (args.pixels_to_jpeg ||
+      (args.pixels_to_jpeg == 1 ||
        cmdline.GetOption(args.opt_jpeg_quality_id)->matched())) {
     decode_to_pixels = true;
   }
@@ -521,10 +536,14 @@ int main(int argc, const char* argv[]) {
       if (!DecompressJxlReconstructJPEG(args, compressed, runner.get(), &bytes,
                                         &stats)) {
         if (bytes.empty()) {
+          if (args.pixels_to_jpeg == 0) {
+            fprintf(stderr, "Error: could not decode losslessly to JPEG.\n");
+            return EXIT_FAILURE;
+          }
           if (!args.quiet) {
             fprintf(stderr,
                     "Warning: could not decode losslessly to JPEG. Retrying "
-                    "with --pixels_to_jpeg...\n");
+                    "with --pixels_to_jpeg=1...\n");
           }
           decode_to_pixels = true;
           break;
