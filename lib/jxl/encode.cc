@@ -2331,6 +2331,11 @@ static bool CanDoFastLossless(const JxlEncoderFrameSettings* frame_settings,
       JXL_BLEND_REPLACE) {
     return false;
   }
+  if (!frame_settings->values.extra_channel_blend_info.empty() &&
+      frame_settings->values.extra_channel_blend_info[0].blendmode !=
+          JXL_BLEND_REPLACE) {
+    return false;
+  }
   if (frame_settings->enc->metadata.m.have_animation) {
     return false;
   }
